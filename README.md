@@ -40,11 +40,11 @@ if err := viper.ReadInConfig(); err != nil {
 3. Call the package with the viper you have just configured and check the error.
 
 ```Go
-	cfg, err := saramaconfig.NewFromViper(viper.GetViper())
+cfg, err := saramaconfig.NewFromViper(viper.GetViper())
 
-	if err != nil {
-		panic(err)
-	}
+if err != nil {
+	panic(err)
+}
 ```
 
 4. Just use `cfg` as a regular Sarama config to run producers, consumers, etc.
