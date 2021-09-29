@@ -1,0 +1,15 @@
+version = "0.11.0.1"
+
+[net]
+dialtimeout = "1s"
+
+    [net.sasl]
+    user = "test"
+
+[producer]
+
+    [producer.return]
+    successes = true
+
+    [producer.flush]
+    maxmessages = 100

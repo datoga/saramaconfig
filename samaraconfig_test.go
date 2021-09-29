@@ -139,5 +139,33 @@ func TestSaramaConfigTLS(t *testing.T) {
 }
 
 func TestSaramaConfigVersion(t *testing.T) {
-	t.FailNow("implement this")
+	v := viper.New()
+
+	v.Set("version", sarama.V0_8_2_0.String())
+
+	config, err := saramaconfig.NewFromViper(v)
+
+	assert.NoError(t, err)
+	require.NotNil(t, config)
+	assert.Equal(t, config.Version, sarama.V0_8_2_0)
+}
+
+func TestSaramaConfigNonParseableVersion(t *testing.T) {
+	v := viper.New()
+
+	v.Set("version", "test")
+
+	_, err := saramaconfig.NewFromViper(v)
+
+	assert.Error(t, err)
+}
+
+func TestSaramaConfigWrongVersionType(t *testing.T) {
+	v := viper.New()
+
+	v.Set("version", 123)
+
+	_, err := saramaconfig.NewFromViper(v)
+
+	assert.Error(t, err)
 }

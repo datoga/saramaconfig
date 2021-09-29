@@ -9,6 +9,10 @@ import (
 	"github.com/spf13/viper"
 )
 
+const (
+	keyRootTLS = "tls"
+)
+
 type RootTLS struct {
 	TLS TLS
 }

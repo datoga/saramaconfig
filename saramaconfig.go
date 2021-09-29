@@ -1,6 +1,7 @@
 package saramaconfig
 
 import (
+	"crypto/tls"
 	"fmt"
 	"reflect"
 	"strings"
@@ -12,38 +13,36 @@ import (
 )
 
 const (
-	scramClientGenerator = "net.sasl.scramclientgeneratorfunc"
-	rootTLS              = "tls"
-	sha256               = "SHA256"
-	sha512               = "SHA512"
+	prefix                  = "kafka"
+	keyScramClientGenerator = "net.sasl.scramclientgeneratorfunc"
+	keyVersion              = "version"
+	sha256                  = "SHA256"
+	sha512                  = "SHA512"
 )
 
+//NewFromViper accepts a *viper.Viper config and parses the content keys into a *sarama.Config struct. It will return an error if the viper cannot be parsed or the sarama configuration does not validate.
 func NewFromViper(v *viper.Viper) (*sarama.Config, error) {
 	bindEnvs(v, *sarama.NewConfig())
+	bindEnvs(v, RootTLS{})
 
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	var hashGeneratorFn scram.HashGeneratorFcn
+	hashGeneratorFn, err := parseHashGeneratorFunc(v)
 
-	if v.IsSet(scramClientGenerator) {
-		fnGenerator := v.GetString(scramClientGenerator)
+	if err != nil {
+		return nil, fmt.Errorf("failed parsing scram generator func with error %v", err)
+	}
 
-		switch fnGenerator {
-		case sha256:
-			hashGeneratorFn = scramclient.SHA256
-		case sha512:
-			hashGeneratorFn = scramclient.SHA512
-		default:
-			return nil, fmt.Errorf("unsupported scram generator function %s, only SHA256 and SHA512 values allowed", fnGenerator)
+	err = parseVersion(v)
 
-		}
-
-		v.Set(scramClientGenerator, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed parsing version with error %v", err)
 	}
 
 	cfg := sarama.NewConfig()
 
-	err := v.Unmarshal(&cfg)
+	err = v.Unmarshal(&cfg)
+
 	if err != nil {
 		return nil, fmt.Errorf("unable to decode into struct, %v", err)
 	}
@@ -54,13 +53,13 @@ func NewFromViper(v *viper.Viper) (*sarama.Config, error) {
 		}
 	}
 
-	if v.IsSet(rootTLS) {
-		tlsConfig, err := tlsConfigFromViper(v)
+	tlsConfig, err := parseTLS(v)
 
-		if err != nil {
-			return nil, fmt.Errorf("failed configuring TLS with error %v", err)
-		}
+	if err != nil {
+		return nil, fmt.Errorf("unable to decode tls with error, %v", err)
+	}
 
+	if tlsConfig != nil {
 		cfg.Net.TLS.Config = tlsConfig
 	}
 
@@ -69,6 +68,62 @@ func NewFromViper(v *viper.Viper) (*sarama.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func parseHashGeneratorFunc(v *viper.Viper) (scram.HashGeneratorFcn, error) {
+	if !v.IsSet(keyScramClientGenerator) {
+		return nil, nil
+	}
+
+	var hashGeneratorFn scram.HashGeneratorFcn
+
+	fnGenerator := v.GetString(keyScramClientGenerator)
+
+	switch fnGenerator {
+	case sha256:
+		hashGeneratorFn = scramclient.SHA256
+	case sha512:
+		hashGeneratorFn = scramclient.SHA512
+	default:
+		return nil, fmt.Errorf("unsupported scram generator function %s, only SHA256 and SHA512 values allowed", fnGenerator)
+
+	}
+
+	v.Set(keyScramClientGenerator, nil)
+
+	return hashGeneratorFn, nil
+}
+
+func parseVersion(v *viper.Viper) error {
+	if !v.IsSet(keyVersion) {
+		return nil
+	}
+
+	version := v.GetString(keyVersion)
+
+	kafkaVersion, err := sarama.ParseKafkaVersion(version)
+
+	if err != nil {
+		return fmt.Errorf("failed parsing version %s with error %v", version, err)
+	}
+
+	v.Set(keyVersion, kafkaVersion)
+
+	return nil
+}
+
+func parseTLS(v *viper.Viper) (*tls.Config, error) {
+	if _, found := v.AllSettings()[keyRootTLS]; !found {
+		return nil, nil
+	}
+
+	tlsConfig, err := tlsConfigFromViper(v)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed configuring TLS with error %v", err)
+	}
+
+	return tlsConfig, nil
 }
 
 func bindEnvs(v *viper.Viper, iface interface{}, parts ...string) {
