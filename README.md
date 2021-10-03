@@ -19,7 +19,7 @@ Sometimes is difficult to parse all the [config settings from Sarama](https://gi
 
   - `net.sasl.scramclientgeneratorfunc` will be parsed as string (with the possible values _SHA256_ and _SHA512_) implementing a generic XDG Scram client using the hash generator you specified.
 
-  - `tls.ca`, `tls.clientpem` and `tls.clientkey` are special keys used to provide certificates and the client key to configure TLS. Don't forget to enable TLS using the regular convention: `net.tls.enable = true`.
+  - `tls.ca`, `tls.clientpem` and `tls.clientkey` are special keys used to provide certificates and the client key to configure TLS. These certificates should be encoded in base64 encoding. Don't forget to enable TLS using the regular convention: `net.tls.enable = true`. Check [the example](examples/tlsenv) to see how to configure TLS.
 
 ## Usage:
 
