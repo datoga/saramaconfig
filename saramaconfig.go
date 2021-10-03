@@ -2,147 +2,73 @@ package saramaconfig
 
 import (
 	"crypto/tls"
-	"fmt"
-	"reflect"
-	"strings"
+	"time"
 
 	"github.com/Shopify/sarama"
-	"github.com/datoga/saramaconfig/scramclient"
 	"github.com/spf13/viper"
-	"github.com/xdg/scram"
-)
-
-const (
-	prefix                  = "kafka"
-	keyScramClientGenerator = "net.sasl.scramclientgeneratorfunc"
-	keyVersion              = "version"
-	sha256                  = "SHA256"
-	sha512                  = "SHA512"
 )
 
 //NewFromViper accepts a *viper.Viper config and parses the content keys into a *sarama.Config struct. It will return an error if the viper cannot be parsed or the sarama configuration does not validate.
 func NewFromViper(v *viper.Viper) (*sarama.Config, error) {
-	bindEnvs(v, *sarama.NewConfig())
-	bindEnvs(v, RootTLS{})
-
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-
-	hashGeneratorFn, err := parseHashGeneratorFunc(v)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed parsing scram generator func with error %v", err)
-	}
-
-	err = parseVersion(v)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed parsing version with error %v", err)
-	}
-
-	cfg := sarama.NewConfig()
-
-	err = v.Unmarshal(&cfg)
-
-	if err != nil {
-		return nil, fmt.Errorf("unable to decode into struct, %v", err)
-	}
-
-	if hashGeneratorFn != nil {
-		cfg.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
-			return &scramclient.XDG{HashGeneratorFcn: hashGeneratorFn}
-		}
-	}
-
-	tlsConfig, err := parseTLS(v)
-
-	if err != nil {
-		return nil, fmt.Errorf("unable to decode tls with error, %v", err)
-	}
-
-	if tlsConfig != nil {
-		cfg.Net.TLS.Config = tlsConfig
-	}
-
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("failed validating sarama config with error %v", err)
-	}
-
-	return cfg, nil
+	return newSaramaConfigFromViper(v)
 }
 
-func parseHashGeneratorFunc(v *viper.Viper) (scram.HashGeneratorFcn, error) {
-	if !v.IsSet(keyScramClientGenerator) {
-		return nil, nil
+//SaramaOpt is the signature for functional options for common.
+type SaramaOpt func(cfg *sarama.Config)
+
+//ProducerNoRetries is an option to not have retries on publishing error.
+func ProducerNoRetries() SaramaOpt {
+	return func(cfg *sarama.Config) {
+		cfg.Producer.Retry.Max = 0
 	}
-
-	var hashGeneratorFn scram.HashGeneratorFcn
-
-	fnGenerator := v.GetString(keyScramClientGenerator)
-
-	switch fnGenerator {
-	case sha256:
-		hashGeneratorFn = scramclient.SHA256
-	case sha512:
-		hashGeneratorFn = scramclient.SHA512
-	default:
-		return nil, fmt.Errorf("unsupported scram generator function %s, only SHA256 and SHA512 values allowed", fnGenerator)
-
-	}
-
-	v.Set(keyScramClientGenerator, nil)
-
-	return hashGeneratorFn, nil
 }
 
-func parseVersion(v *viper.Viper) error {
-	if !v.IsSet(keyVersion) {
-		return nil
+//ProducerMaxRetries allows to set a number of retries in case of publishing errors.
+func ProducerMaxRetries(retries int) SaramaOpt {
+	return func(cfg *sarama.Config) {
+		cfg.Producer.Retry.Max = retries
 	}
-
-	version := v.GetString(keyVersion)
-
-	kafkaVersion, err := sarama.ParseKafkaVersion(version)
-
-	if err != nil {
-		return fmt.Errorf("failed parsing version %s with error %v", version, err)
-	}
-
-	v.Set(keyVersion, kafkaVersion)
-
-	return nil
 }
 
-func parseTLS(v *viper.Viper) (*tls.Config, error) {
-	if _, found := v.AllSettings()[keyRootTLS]; !found {
-		return nil, nil
+//ConsumerBatch is an option to enable batching on consuming data.
+func ConsumerBatch(minFetchBytes int, maxWaitTime time.Duration) SaramaOpt {
+	return func(cfg *sarama.Config) {
+		cfg.Consumer.Fetch.Min = int32(minFetchBytes)
+		cfg.Consumer.MaxWaitTime = maxWaitTime
 	}
-
-	tlsConfig, err := tlsConfigFromViper(v)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed configuring TLS with error %v", err)
-	}
-
-	return tlsConfig, nil
 }
 
-func bindEnvs(v *viper.Viper, iface interface{}, parts ...string) {
-	ifv := reflect.ValueOf(iface)
-	ift := reflect.TypeOf(iface)
-	for i := 0; i < ift.NumField(); i++ {
-		fieldv := ifv.Field(i)
-		t := ift.Field(i)
-		name := strings.ToLower(t.Name)
-		tag, ok := t.Tag.Lookup("mapstructure")
-		if ok {
-			name = tag
-		}
-		path := append(parts, name)
-		switch fieldv.Kind() {
-		case reflect.Struct:
-			bindEnvs(v, fieldv.Interface(), path...)
-		default:
-			v.BindEnv(strings.Join(path, "."))
-		}
+//ConsumerCommitAsync is an option to enable async commits.
+func ConsumerCommitAsync(interval time.Duration) SaramaOpt {
+	return func(cfg *sarama.Config) {
+		cfg.Consumer.Offsets.AutoCommit.Enable = true
+		cfg.Consumer.Offsets.AutoCommit.Interval = interval
+	}
+}
+
+//Timeout sets the default timeout.
+func Timeout(timeout time.Duration) SaramaOpt {
+	return func(cfg *sarama.Config) {
+		cfg.Net.DialTimeout = timeout
+		cfg.Net.ReadTimeout = timeout
+		cfg.Admin.Timeout = timeout
+	}
+}
+
+//SASL configures the SASL handshake.
+func SASL(saslMechanism sarama.SASLMechanism, username string, password string) SaramaOpt {
+	return func(cfg *sarama.Config) {
+		cfg.Net.SASL.Enable = true
+		cfg.Net.SASL.Mechanism = saslMechanism
+		cfg.Net.SASL.User = username
+		cfg.Net.SASL.Password = password
+	}
+}
+
+//TLS configures the secure connection.
+func TLS(config *tls.Config) SaramaOpt {
+	return func(cfg *sarama.Config) {
+		cfg.Net.TLS.Enable = true
+		cfg.Net.TLS.Config = config
 	}
 }

@@ -14,10 +14,10 @@ const (
 )
 
 type RootTLS struct {
-	TLS TLS
+	TLS TLSConfig
 }
 
-type TLS struct {
+type TLSConfig struct {
 	CA        string
 	ClientPem string
 	ClientKey string
